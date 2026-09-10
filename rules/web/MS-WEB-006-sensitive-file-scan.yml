@@ -1,0 +1,63 @@
+title: Sensitive File and Secret Exposure Scan Detection
+id: MS-WEB-006
+status: production
+version: 1.0.0
+author: Emin Yahyazadə
+date: 2026-09-10
+
+description: >
+  Detects attempts to access commonly exposed configuration files,
+  source-control metadata, environment files, backups, administrative
+  interfaces and other sensitive resources frequently targeted by attackers.
+
+severity: medium
+
+data_source:
+  index: millisec_web
+  sourcetype: nginx:docker
+
+mitre_attack:
+  tactic:
+    - Discovery
+  technique:
+    - T1083
+  technique_name:
+    - File and Directory Discovery
+
+splunk:
+  name: MilliSec - Sensitive File Scan Detection
+  schedule: "*/1 * * * *"
+  earliest_time: "-2m"
+  latest_time: "now"
+  alert_type: number of events
+  alert_comparator: greater than
+  alert_threshold: 0
+  throttle_seconds: 120
+
+search: |
+  index=millisec_web sourcetype="nginx:docker"
+  | rex field=line "^(?<src_ip>\S+) - - \[(?<request_time>[^\]]+)\] \"(?<method>\S+) (?<uri>\S+) (?<protocol>[^\"]+)\" (?<status>\d{3}) (?<bytes>\d+) \"(?<referer>[^\"]*)\" \"(?<user_agent>[^\"]*)\""
+  | eval decoded_uri=lower(urldecode(uri))
+  | where match(decoded_uri,"/\.env($|\?)|/\.git/|/\.svn/|wp-config\.php|config\.(json|yml|yaml|php)|backup\.(zip|tar|gz|sql)|/phpmyadmin|/server-status|/actuator/env|/debug")
+  | eval detection="Sensitive File or Secret Exposure Scan"
+  | eval rule_id="MS-WEB-006"
+  | eval severity="medium"
+  | table _time rule_id detection severity src_ip method uri status user_agent
+
+false_positives:
+  - Authorized vulnerability scanning
+  - Internal administrative monitoring
+  - Approved security validation activity
+
+investigation:
+  - Review the requested sensitive resource
+  - Check the HTTP response status and response size
+  - Confirm whether the requested file or endpoint exists
+  - Determine whether credentials or secrets may have been exposed
+  - Correlate the source IP with other reconnaissance activity
+
+response:
+  - Remove publicly exposed sensitive resources
+  - Restrict access to administrative and hidden files
+  - Rotate any credentials that may have been exposed
+  - Block repeat malicious scanners where appropriate
