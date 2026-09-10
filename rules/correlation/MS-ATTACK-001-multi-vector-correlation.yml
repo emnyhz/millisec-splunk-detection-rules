@@ -1,0 +1,93 @@
+title: Multi-Vector Web Attack Correlation
+id: MS-ATTACK-001
+status: production
+version: 1.0.0
+author: Emin Yahyazadə
+date: 2026-09-10
+
+description: >
+  Correlates multiple distinct web attack techniques originating from the
+  same source IP within a short monitoring window. A source attempting
+  several exploitation methods is treated as a significantly higher-risk
+  threat than a single isolated signature match.
+
+severity: critical
+
+data_source:
+  index: millisec_web
+  sourcetype: nginx:docker
+
+mitre_attack:
+  tactic:
+    - Reconnaissance
+    - Initial Access
+    - Execution
+  technique:
+    - T1595
+    - T1190
+    - T1059
+  technique_name:
+    - Active Scanning
+    - Exploit Public-Facing Application
+    - Command and Scripting Interpreter
+
+splunk:
+  name: MilliSec - Multi Vector Attack Correlation
+  schedule: "*/1 * * * *"
+  earliest_time: "-11m"
+  latest_time: "now"
+  alert_type: number of events
+  alert_comparator: greater than
+  alert_threshold: 0
+  throttle_seconds: 600
+
+search: |
+  index=millisec_web sourcetype="nginx:docker"
+  | rex field=line "^(?<src_ip>\S+) - - \[(?<request_time>[^\]]+)\] \"(?<method>\S+) (?<uri>\S+) (?<protocol>[^\"]+)\" (?<status>\d{3}) (?<bytes>\d+) \"(?<referer>[^\"]*)\" \"(?<user_agent>[^\"]*)\""
+  | eval decoded_uri=lower(urldecode(uri))
+  | eval attack_technique=case(
+      match(decoded_uri,"union\s+select|information_schema|sleep\s*\(|benchmark\s*\("),"SQL Injection",
+      match(decoded_uri,"<script|javascript:|onerror\s*=|onload\s*=|<svg"),"XSS",
+      match(decoded_uri,"\.\./|/etc/passwd|/etc/shadow|proc/self/environ"),"Path Traversal",
+      match(decoded_uri,"(;|\|\||&&|\$\(|`)(\s*)?(whoami|id|uname|cat|curl|wget|bash|sh)"),"Command Injection",
+      match(decoded_uri,"169\.254\.169\.254|latest/meta-data|127\.0\.0\.1|localhost"),"SSRF",
+      match(decoded_uri,"/\.env|/\.git/|wp-config\.php|backup\.(zip|sql|tar|gz)"),"Sensitive File Scan",
+      true(),"Other"
+    )
+  | where attack_technique!="Other"
+  | stats
+      count as total_attack_events
+      dc(attack_technique) as distinct_techniques
+      values(attack_technique) as techniques
+      values(uri) as sample_payloads
+      values(status) as response_statuses
+      min(_time) as first_seen
+      max(_time) as last_seen
+      by src_ip
+  | where distinct_techniques>=3
+  | eval attack_duration=last_seen-first_seen
+  | eval detection="Multi-Vector Web Attack"
+  | eval rule_id="MS-ATTACK-001"
+  | eval severity="critical"
+  | convert ctime(first_seen) ctime(last_seen)
+  | table rule_id detection severity src_ip total_attack_events distinct_techniques techniques attack_duration first_seen last_seen response_statuses sample_payloads
+
+false_positives:
+  - Authorized penetration testing
+  - Approved red team exercises
+  - Comprehensive vulnerability scanners operated by internal security teams
+
+investigation:
+  - Review the chronological sequence of detected attack techniques
+  - Identify which application endpoints were targeted
+  - Check whether any malicious request received a successful HTTP response
+  - Correlate the source IP with authentication and access-control detections
+  - Review backend and container logs for evidence of successful exploitation
+  - Investigate source IP reputation, ownership and geolocation
+
+response:
+  - Block confirmed hostile source addresses
+  - Escalate the activity to incident response with critical priority
+  - Inspect targeted systems for signs of compromise
+  - Preserve relevant web, backend and container logs
+  - Review affected credentials and secrets where appropriate
