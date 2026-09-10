@@ -1,0 +1,66 @@
+title: Distributed Brute Force Authentication Detection
+id: MS-AUTH-001
+status: production
+version: 1.0.0
+author: Emin Yahyazadə
+date: 2026-09-10
+
+description: >
+  Detects repeated failed authentication attempts against the MilliSec
+  login endpoint, including concentrated brute-force activity from a
+  single source and distributed attempts originating from multiple
+  source addresses within a short time window.
+
+severity: high
+
+data_source:
+  index: millisec_web
+  sourcetype: nginx:docker
+
+mitre_attack:
+  tactic:
+    - Credential Access
+  technique:
+    - T1110
+  technique_name:
+    - Brute Force
+
+splunk:
+  name: MilliSec - Distributed Brute Force Detection
+  schedule: "*/1 * * * *"
+  earliest_time: "-6m"
+  latest_time: "now"
+  alert_type: number of events
+  alert_comparator: greater than
+  alert_threshold: 0
+  throttle_seconds: 300
+
+search: |
+  index=millisec_web sourcetype="nginx:docker"
+  | rex field=line "^(?<src_ip>\S+) - - \[(?<request_time>[^\]]+)\] \"(?<method>\S+) (?<uri>\S+) (?<protocol>[^\"]+)\" (?<status>\d{3}) (?<bytes>\d+) \"(?<referer>[^\"]*)\" \"(?<user_agent>[^\"]*)\""
+  | where like(uri,"/api/login%") AND status IN ("401","403")
+  | bin _time span=5m
+  | stats count as failed_attempts dc(src_ip) as distinct_sources values(src_ip) as source_ips by _time
+  | where failed_attempts>=8 OR (failed_attempts>=5 AND distinct_sources>=3)
+  | eval detection="Distributed Brute Force Authentication"
+  | eval rule_id="MS-AUTH-001"
+  | eval severity="high"
+  | table _time rule_id detection severity failed_attempts distinct_sources source_ips
+
+false_positives:
+  - Multiple legitimate users behind the same NAT entering incorrect passwords
+  - Authorized authentication testing
+  - Load testing against the login endpoint
+
+investigation:
+  - Review the volume and timing of failed authentication attempts
+  - Identify whether attempts originate from one or multiple sources
+  - Correlate the activity with successful login events
+  - Review source IP geolocation and reputation
+  - Check whether the same sources triggered reconnaissance or exploit rules
+
+response:
+  - Apply temporary rate limiting or blocking to confirmed malicious sources
+  - Enforce MFA for affected accounts
+  - Reset credentials if account compromise is suspected
+  - Escalate sustained brute-force activity to incident response
