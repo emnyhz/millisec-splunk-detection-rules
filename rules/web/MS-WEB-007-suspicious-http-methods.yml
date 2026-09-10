@@ -1,0 +1,62 @@
+title: Suspicious HTTP Method and WebDAV Abuse Detection
+id: MS-WEB-007
+status: production
+version: 1.0.0
+author: Emin Yahyazadə
+date: 2026-09-10
+
+description: >
+  Detects uncommon or high-risk HTTP methods that may indicate endpoint
+  probing, WebDAV abuse, unauthorized resource modification or attempts
+  to bypass normal application controls.
+
+severity: medium
+
+data_source:
+  index: millisec_web
+  sourcetype: nginx:docker
+
+mitre_attack:
+  tactic:
+    - Initial Access
+  technique:
+    - T1190
+  technique_name:
+    - Exploit Public-Facing Application
+
+splunk:
+  name: MilliSec - Suspicious HTTP Method Detection
+  schedule: "*/1 * * * *"
+  earliest_time: "-2m"
+  latest_time: "now"
+  alert_type: number of events
+  alert_comparator: greater than
+  alert_threshold: 0
+  throttle_seconds: 120
+
+search: |
+  index=millisec_web sourcetype="nginx:docker"
+  | rex field=line "^(?<src_ip>\S+) - - \[(?<request_time>[^\]]+)\] \"(?<method>\S+) (?<uri>\S+) (?<protocol>[^\"]+)\" (?<status>\d{3}) (?<bytes>\d+) \"(?<referer>[^\"]*)\" \"(?<user_agent>[^\"]*)\""
+  | eval method=upper(method)
+  | where method IN ("TRACE","TRACK","CONNECT","PROPFIND","PROPPATCH","MKCOL","COPY","MOVE","LOCK","UNLOCK","PUT","DELETE")
+  | eval detection="Suspicious HTTP Method"
+  | eval rule_id="MS-WEB-007"
+  | eval severity="medium"
+  | table _time rule_id detection severity src_ip method uri status user_agent
+
+false_positives:
+  - Approved REST API requests using PUT or DELETE
+  - Legitimate WebDAV services
+  - Authorized security testing
+
+investigation:
+  - Verify whether the HTTP method is expected for the requested endpoint
+  - Review the HTTP response status and affected resource
+  - Check whether any resource modification occurred
+  - Correlate the source IP with reconnaissance and exploit activity
+
+response:
+  - Disable unnecessary HTTP methods
+  - Restrict write-capable methods to authenticated users
+  - Block confirmed malicious source addresses
+  - Review affected resources for unauthorized modification
