@@ -1,0 +1,88 @@
+title: High-Severity Attack Burst and Repeat Offender Detection
+id: MS-ATTACK-002
+status: production
+version: 1.0.0
+author: Emin Yahyazadə
+date: 2026-09-10
+
+description: >
+  Detects source IP addresses generating a rapid burst of high-risk web
+  exploitation indicators within a short time window. The rule combines
+  attack signature matching, event volume and payload diversity to identify
+  repeat offenders that may require immediate containment.
+
+severity: critical
+
+data_source:
+  index: millisec_web
+  sourcetype: nginx:docker
+
+mitre_attack:
+  tactic:
+    - Initial Access
+    - Execution
+  technique:
+    - T1190
+    - T1059
+  technique_name:
+    - Exploit Public-Facing Application
+    - Command and Scripting Interpreter
+
+splunk:
+  name: MilliSec - High Severity Attack Burst
+  schedule: "*/1 * * * *"
+  earliest_time: "-6m"
+  latest_time: "now"
+  alert_type: number of events
+  alert_comparator: greater than
+  alert_threshold: 0
+  throttle_seconds: 600
+
+search: |
+  index=millisec_web sourcetype="nginx:docker"
+  | rex field=line "^(?<src_ip>\S+) - - \[(?<request_time>[^\]]+)\] \"(?<method>\S+) (?<uri>\S+) (?<protocol>[^\"]+)\" (?<status>\d{3}) (?<bytes>\d+) \"(?<referer>[^\"]*)\" \"(?<user_agent>[^\"]*)\""
+  | eval decoded_uri=lower(urldecode(uri))
+  | eval high_risk=if(
+      match(
+        decoded_uri,
+        "union\s+select|information_schema|sleep\s*\(|benchmark\s*\(|<script|javascript:|onerror\s*=|\.\./|/etc/passwd|(;|\|\||&&|\$\(|`)(\s*)?(whoami|id|uname|cat|curl|wget|bash|sh)|169\.254\.169\.254|latest/meta-data"
+      ),
+      1,
+      0
+    )
+  | where high_risk=1
+  | stats
+      count as high_risk_events
+      dc(uri) as unique_payloads
+      values(uri) as sample_payloads
+      values(status) as response_statuses
+      min(_time) as first_seen
+      max(_time) as last_seen
+      by src_ip
+  | eval attack_duration=last_seen-first_seen
+  | where high_risk_events>=5 AND unique_payloads>=3
+  | eval detection="High-Severity Attack Burst"
+  | eval rule_id="MS-ATTACK-002"
+  | eval severity="critical"
+  | convert ctime(first_seen) ctime(last_seen)
+  | table rule_id detection severity src_ip high_risk_events unique_payloads attack_duration first_seen last_seen response_statuses sample_payloads
+
+false_positives:
+  - Authorized penetration testing
+  - Approved red team exercises
+  - Automated security validation performed by internal security teams
+
+investigation:
+  - Review the chronological sequence of high-risk requests
+  - Determine which attack signatures were triggered
+  - Check whether multiple application endpoints were targeted
+  - Review HTTP response codes for possible successful exploitation
+  - Correlate the source IP with other critical MilliSec detection rules
+  - Review backend and container logs for evidence of compromise
+
+response:
+  - Block confirmed malicious repeat offenders
+  - Escalate the event to incident response with critical priority
+  - Review targeted services for evidence of successful exploitation
+  - Preserve relevant security logs and forensic evidence
+  - Increase monitoring for related source infrastructure
