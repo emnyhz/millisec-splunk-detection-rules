@@ -1,7 +1,7 @@
 title: Advanced SQL Injection Detection
 id: MS-WEB-001
 status: production
-version: 1.0.0
+version: 1.0.1
 author: Emin Yahyazadə
 date: 2026-09-10
 
@@ -32,7 +32,7 @@ splunk:
   alert_type: number of events
   alert_comparator: greater than
   alert_threshold: 0
-  throttle_seconds: 60
+  throttle_seconds: 120
 
 search: |
   index=millisec_web sourcetype="nginx:docker"
