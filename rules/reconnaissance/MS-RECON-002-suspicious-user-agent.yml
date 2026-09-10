@@ -1,0 +1,71 @@
+title: Suspicious Automated Scanner User-Agent Detection
+id: MS-RECON-002
+status: production
+version: 1.0.0
+author: Emin Yahyazadə
+date: 2026-09-10
+
+description: >
+  Detects HTTP requests associated with common offensive security scanners,
+  scripted reconnaissance tools and suspicious or missing User-Agent values.
+  Frequency thresholds are used to reduce false positives.
+
+severity: medium
+
+data_source:
+  index: millisec_web
+  sourcetype: nginx:docker
+
+mitre_attack:
+  tactic:
+    - Reconnaissance
+  technique:
+    - T1595
+  technique_name:
+    - Active Scanning
+
+splunk:
+  name: MilliSec - Suspicious User Agent Detection
+  schedule: "*/2 * * * *"
+  earliest_time: "-11m"
+  latest_time: "now"
+  alert_type: number of events
+  alert_comparator: greater than
+  alert_threshold: 0
+  throttle_seconds: 600
+
+search: |
+  index=millisec_web sourcetype="nginx:docker"
+  | rex field=line "^(?<src_ip>\S+) - - \[(?<request_time>[^\]]+)\] \"(?<method>\S+) (?<uri>\S+) (?<protocol>[^\"]+)\" (?<status>\d{3}) (?<bytes>\d+) \"(?<referer>[^\"]*)\" \"(?<user_agent>[^\"]*)\""
+  | eval normalized_ua=lower(coalesce(user_agent,""))
+  | where match(normalized_ua,"sqlmap|nikto|nmap|masscan|acunetix|nessus|nuclei|gobuster|dirbuster|ffuf|wpscan|python-requests|curl/")
+      OR len(normalized_ua)=0
+  | stats
+      count as request_count
+      dc(uri) as unique_paths
+      values(user_agent) as observed_user_agents
+      values(status) as response_statuses
+      by src_ip
+  | where request_count>=3
+  | eval detection="Suspicious Automated Scanner User-Agent"
+  | eval rule_id="MS-RECON-002"
+  | eval severity="medium"
+  | table rule_id detection severity src_ip request_count unique_paths observed_user_agents response_statuses
+
+false_positives:
+  - Authorized vulnerability scanners
+  - Internal administrative scripts using curl or Python requests
+  - Approved penetration testing
+
+investigation:
+  - Verify whether the source IP belongs to an approved security scanner
+  - Review the targeted paths and response status codes
+  - Correlate the source with web exploitation detections
+  - Review scanning frequency and duration
+  - Check source IP geolocation and reputation
+
+response:
+  - Allowlist approved scanners where appropriate
+  - Rate limit unauthorized automated scanning
+  - Block confirmed malicious reconnaissance sources
+  - Monitor the same source for follow-on exploitation activity
