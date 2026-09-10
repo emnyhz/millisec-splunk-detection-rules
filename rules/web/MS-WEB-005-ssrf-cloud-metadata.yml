@@ -1,0 +1,64 @@
+title: SSRF and Cloud Metadata Access Detection
+id: MS-WEB-005
+status: production
+version: 1.0.0
+author: Emin Yahyazadə
+date: 2026-09-10
+
+description: >
+  Detects Server-Side Request Forgery attempts targeting loopback,
+  private network ranges, link-local addresses and cloud instance
+  metadata services through user-controlled HTTP request parameters.
+
+severity: critical
+
+data_source:
+  index: millisec_web
+  sourcetype: nginx:docker
+
+mitre_attack:
+  tactic:
+    - Credential Access
+  technique:
+    - T1552.005
+  technique_name:
+    - Unsecured Credentials - Cloud Instance Metadata API
+
+splunk:
+  name: MilliSec - SSRF Cloud Metadata Detection
+  schedule: "*/1 * * * *"
+  earliest_time: "-2m"
+  latest_time: "now"
+  alert_type: number of events
+  alert_comparator: greater than
+  alert_threshold: 0
+  throttle_seconds: 60
+
+search: |
+  index=millisec_web sourcetype="nginx:docker"
+  | rex field=line "^(?<src_ip>\S+) - - \[(?<request_time>[^\]]+)\] \"(?<method>\S+) (?<uri>\S+) (?<protocol>[^\"]+)\" (?<status>\d{3}) (?<bytes>\d+) \"(?<referer>[^\"]*)\" \"(?<user_agent>[^\"]*)\""
+  | eval decoded_uri=lower(urldecode(uri))
+  | where match(decoded_uri,"169\.254\.169\.254|latest/meta-data|metadata\.google\.internal|127\.0\.0\.1|localhost|0\.0\.0\.0|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+")
+  | eval detection="SSRF or Cloud Metadata Access Attempt"
+  | eval rule_id="MS-WEB-005"
+  | eval severity="critical"
+  | table _time rule_id detection severity src_ip method uri status user_agent
+
+false_positives:
+  - Authorized penetration testing
+  - Approved vulnerability scanning
+  - Internal application features intentionally requesting private resources
+
+investigation:
+  - Review the complete request and user-controlled URL parameter
+  - Determine whether the application made a server-side outbound request
+  - Review backend logs for connections to internal or metadata addresses
+  - Check cloud audit logs for suspicious use of temporary credentials
+  - Correlate the source with other web exploitation activity
+
+response:
+  - Restrict outbound requests from the application using allowlists
+  - Block access to cloud metadata endpoints from application workloads
+  - Rotate cloud credentials if metadata access was successful
+  - Block confirmed malicious source addresses
+  - Escalate confirmed credential exposure to incident response
