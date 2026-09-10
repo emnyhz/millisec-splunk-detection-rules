@@ -1,0 +1,47 @@
+title: SSRF and Cloud Metadata Access Detection
+id: MS-WEB-005
+status: production
+version: 1.0.0
+author: Emin Yahyazadə
+date: '2026-09-10'
+description: Detects Server-Side Request Forgery attempts targeting loopback, RFC1918, link-local and cloud instance metadata endpoints, including common AWS metadata paths.
+severity: critical
+data_source:
+  index: millisec_web
+  sourcetype: nginx:docker
+mitre_attack:
+  tactic:
+  - Credential Access
+  technique:
+  - T1552.005
+  technique_name:
+  - Unsecured Credentials - Cloud Instance Metadata API
+splunk:
+  name: MilliSec - SSRF Cloud Metadata Detection
+  schedule: '*/1 * * * *'
+  earliest_time: -2m
+  latest_time: now
+  alert_type: number of events
+  alert_comparator: greater than
+  alert_threshold: 0
+  throttle_seconds: 60
+search: |
+  index=millisec_web sourcetype="nginx:docker"
+  | rex field=line "^(?<src_ip>\\S+) - - \\[(?<request_time>[^\\]]+)\\] \\\"(?<method>\\S+) (?<uri>\\S+) (?<protocol>[^\\\"]+)\\\" (?<status>\\d{3}) (?<bytes>\\d+) \\\"(?<referer>[^\\\"]*)\\\" \\\"(?<user_agent>[^\\\"]*)\\\""
+  | eval decoded_uri=lower(urldecode(uri))
+  | where match(decoded_uri,"169\\.254\\.169\\.254|metadata\\.google\\.internal|127\\.0\\.0\\.1|localhost|0\\.0\\.0\\.0|10\\.\\d+\\.\\d+\\.\\d+|192\\.168\\.\\d+\\.\\d+|172\\.(1[6-9]|2\\d|3[01])\\.\\d+\\.\\d+|latest/meta-data")
+  | eval detection="SSRF or Cloud Metadata Access Attempt", rule_id="MS-WEB-005", severity="critical"
+  | table _time rule_id detection severity src_ip method uri status user_agent
+false_positives:
+- Approved security testing
+- Internal diagnostics designed to fetch internal URLs
+investigation:
+- Identify the URL-fetching parameter
+- Review backend egress connections
+- Check cloud audit logs for metadata-credential use
+- Correlate with subsequent authenticated activity
+response:
+- Block metadata access from application workloads
+- Restrict outbound requests with allowlists
+- Rotate cloud credentials if exposure succeeded
+- Escalate confirmed credential exposure

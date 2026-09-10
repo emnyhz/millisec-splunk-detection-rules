@@ -1,0 +1,47 @@
+title: Advanced Cross-Site Scripting Detection
+id: MS-WEB-002
+status: production
+version: 1.0.0
+author: Emin Yahyazadə
+date: '2026-09-10'
+description: Detects encoded and decoded Cross-Site Scripting payloads in HTTP request URIs, including script tags, JavaScript URI handlers and browser event-handler primitives.
+severity: high
+data_source:
+  index: millisec_web
+  sourcetype: nginx:docker
+mitre_attack:
+  tactic:
+  - Initial Access
+  technique:
+  - T1190
+  technique_name:
+  - Exploit Public-Facing Application
+splunk:
+  name: MilliSec - Advanced XSS Detection
+  schedule: '*/1 * * * *'
+  earliest_time: -2m
+  latest_time: now
+  alert_type: number of events
+  alert_comparator: greater than
+  alert_threshold: 0
+  throttle_seconds: 60
+search: |
+  index=millisec_web sourcetype="nginx:docker"
+  | rex field=line "^(?<src_ip>\\S+) - - \\[(?<request_time>[^\\]]+)\\] \\\"(?<method>\\S+) (?<uri>\\S+) (?<protocol>[^\\\"]+)\\\" (?<status>\\d{3}) (?<bytes>\\d+) \\\"(?<referer>[^\\\"]*)\\\" \\\"(?<user_agent>[^\\\"]*)\\\""
+  | eval decoded_uri=lower(urldecode(uri))
+  | where match(decoded_uri,"<script|javascript:|onerror\\s*=|onload\\s*=|document\\.cookie|alert\\s*\\(|<svg|<iframe|%3cscript")
+  | eval detection="Cross-Site Scripting Attempt", rule_id="MS-WEB-002", severity="high"
+  | table _time rule_id detection severity src_ip method uri status user_agent
+false_positives:
+- Authorized application security testing
+- Benign documentation requests containing JavaScript examples
+investigation:
+- Review the complete request URI and parameters
+- Check whether the payload reached a vulnerable endpoint
+- Correlate the source with other exploit attempts
+- Review application logs for reflected or stored payload execution
+response:
+- Block confirmed malicious sources
+- Validate output encoding and input sanitization
+- Review Content Security Policy
+- Escalate evidence of successful script execution

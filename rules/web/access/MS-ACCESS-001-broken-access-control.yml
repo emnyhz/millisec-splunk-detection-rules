@@ -1,0 +1,49 @@
+title: Broken Access Control and Unauthorized API Access Detection
+id: MS-ACCESS-001
+status: production
+version: 1.0.0
+author: Emin Yahyazadə
+date: '2026-09-10'
+description: Detects repeated unauthorized or forbidden requests to sensitive MilliSec API endpoints, including user, profile, administration and management paths.
+severity: high
+data_source:
+  index: millisec_web
+  sourcetype: nginx:docker
+mitre_attack:
+  tactic:
+  - Collection
+  technique:
+  - T1213
+  technique_name:
+  - Data from Information Repositories
+splunk:
+  name: MilliSec - Broken Access Control Detection
+  schedule: '*/1 * * * *'
+  earliest_time: -6m
+  latest_time: now
+  alert_type: number of events
+  alert_comparator: greater than
+  alert_threshold: 0
+  throttle_seconds: 300
+search: |
+  index=millisec_web sourcetype="nginx:docker"
+  | rex field=line "^(?<src_ip>\\S+) - - \\[(?<request_time>[^\\]]+)\\] \\\"(?<method>\\S+) (?<uri>\\S+) (?<protocol>[^\\\"]+)\\\" (?<status>\\d{3}) (?<bytes>\\d+) \\\"(?<referer>[^\\\"]*)\\\" \\\"(?<user_agent>[^\\\"]*)\\\""
+  | eval decoded_uri=lower(urldecode(uri))
+  | where status IN ("401","403") AND match(decoded_uri,"^/api/(v1/)?(users|profile|admin|management|settings|roles|permissions)")
+  | stats count as denied_requests values(uri) as targeted_paths values(method) as methods by src_ip
+  | where denied_requests>=3
+  | eval detection="Broken Access Control or Unauthorized API Access", rule_id="MS-ACCESS-001", severity="high"
+  | table rule_id detection severity src_ip denied_requests targeted_paths methods
+false_positives:
+- Misconfigured legitimate API clients
+- Expired sessions repeatedly retrying a protected endpoint
+investigation:
+- Review targeted endpoints and methods
+- Determine whether a valid authenticated session was present
+- Correlate with authentication failures and reconnaissance
+- Check for successful access to the same resources
+response:
+- Revoke suspicious sessions or API tokens
+- Review RBAC and authorization middleware
+- Block abusive sources
+- Escalate confirmed unauthorized data access

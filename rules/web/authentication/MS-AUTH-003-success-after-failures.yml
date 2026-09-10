@@ -1,0 +1,50 @@
+title: Successful Access After Repeated Authentication Failures
+id: MS-AUTH-003
+status: production
+version: 1.0.0
+author: Emin Yahyazadə
+date: '2026-09-10'
+description: Correlates repeated authentication failures with a subsequent successful response from the same source, highlighting possible account compromise or successful credential guessing.
+severity: critical
+data_source:
+  index: millisec_web
+  sourcetype: nginx:docker
+mitre_attack:
+  tactic:
+  - Credential Access
+  technique:
+  - T1110
+  technique_name:
+  - Brute Force
+splunk:
+  name: MilliSec - Successful Login After Failures
+  schedule: '*/1 * * * *'
+  earliest_time: -11m
+  latest_time: now
+  alert_type: number of events
+  alert_comparator: greater than
+  alert_threshold: 0
+  throttle_seconds: 300
+search: |
+  index=millisec_web sourcetype="nginx:docker"
+  | rex field=line "^(?<src_ip>\\S+) - - \\[(?<request_time>[^\\]]+)\\] \\\"(?<method>\\S+) (?<uri>\\S+) (?<protocol>[^\\\"]+)\\\" (?<status>\\d{3}) (?<bytes>\\d+) \\\"(?<referer>[^\\\"]*)\\\" \\\"(?<user_agent>[^\\\"]*)\\\""
+  | where like(uri,"/api/login%")
+  | eval failed=if(status IN ("401","403"),1,0), success=if(status IN ("200","201","204"),1,0)
+  | stats sum(failed) as failures sum(success) as successes max(eval(if(success=1,_time,null()))) as success_time min(_time) as first_seen by src_ip
+  | where failures>=5 AND successes>=1 AND isnotnull(success_time)
+  | eval detection="Successful Authentication After Multiple Failures", rule_id="MS-AUTH-003", severity="critical"
+  | convert ctime(first_seen) ctime(success_time)
+  | table rule_id detection severity src_ip failures successes first_seen success_time
+false_positives:
+- A legitimate user eventually entering the correct password
+- Authorized authentication testing
+investigation:
+- Validate whether the successful session belongs to the expected user
+- Review activity immediately after login
+- Check source reputation and prior attack history
+- Look for access to privileged API endpoints
+response:
+- Revoke suspicious sessions
+- Require password reset and MFA verification
+- Block confirmed malicious sources
+- Escalate potential account compromise
